@@ -1,36 +1,17 @@
-use clap::clap_derive::ArgEnum;
 use clap::Parser;
 use std::fs;
 use std::io::{self, BufRead};
-
-#[derive(ArgEnum, Debug, Ord, PartialOrd, Eq, PartialEq, Clone)]
-enum Target {
-    Json,
-    Toml,
-    Yaml,
-}
-#[derive(Parser, Debug)]
-#[clap(name = "mp", author,version,about,long_about = None)]
-struct Cli {
-    ///overwrite file if exists
-    #[clap(short, long)]
-    force: bool,
-
-    #[clap(value_parser)]
-    source: Option<String>,
-
-    #[clap(short, long, arg_enum, default_value_t=Target::Json)]
-    target: Target,
-
-    #[clap(short, long)]
-    /// defile output file to the conversion, it's overwrite the target
-    output: Option<String>,
-}
+pub mod types;
+use crate::types::{Cli, Target};
+pub mod parser;
 
 fn get_from_stdin() -> io::Result<String> {
     let mut buffer = String::default();
-    let mut stdin = io::stdin().lock();
-    stdin.read_line(&mut buffer)?;
+    let stdin = io::stdin().lock();
+    for line in stdin.lines() {
+        buffer.push_str(&line?);
+        buffer.push('\n');
+    }
     Ok(buffer)
 }
 
@@ -39,7 +20,6 @@ fn is_file(text: &String) -> bool {
 }
 
 fn get_payload(content: &String) -> io::Result<String> {
-    print!("test");
     let result = match is_file(content) {
         true => {
             let content = fs::read_to_string(content).expect("impossible to read the file");
@@ -68,8 +48,8 @@ fn try_get_file_extesion(output: &String) -> Option<Target> {
 }
 
 fn parse_input(cli: &mut Cli) -> io::Result<(String, Option<Target>)> {
-    match cli.source.clone() {
-        Some(s) => Ok((get_payload(&s)?, try_get_file_extesion(&s))),
+    match cli.source {
+        Some(ref s) => Ok((get_payload(&s)?, try_get_file_extesion(&s))),
         None => {
             let content = get_from_stdin()?.trim().to_string();
             let file = is_file(&content);
@@ -82,12 +62,10 @@ fn parse_input(cli: &mut Cli) -> io::Result<(String, Option<Target>)> {
     }
 }
 
-fn main() -> std::io::Result<()> {
+fn main() -> anyhow::Result<()> {
     let mut cli = Cli::parse();
-    let (payload, target) = parse_input(&mut cli)?;
-    println!("{} {:?}", payload, target);
-
-    let (outputPath, target) = if let Some(output) = cli.output {
+    let (input, input_target) = parse_input(&mut cli)?;
+    let (output_path, output_target) = if let Some(output) = cli.output {
         (
             Some(output.clone()),
             try_get_file_extesion(&output).unwrap_or(cli.target),
@@ -96,14 +74,11 @@ fn main() -> std::io::Result<()> {
         (None, cli.target)
     };
 
-    Ok(())
-}
-#[test]
-fn parsed() {
-    let rs = std::path::Path::new(&String::from(
-        "/home/matheus-barbieri/hello-test-wasm/Cargo.toml",
-    ))
-    .exists();
+    let parsed = parser::parse(&input, input_target, output_target)?;
+    match output_path {
+        Some(p) => fs::write(p, parsed)?,
+        None => println!("{}", parsed),
+    }
 
-    assert_eq!(rs, true);
+    Ok(())
 }
